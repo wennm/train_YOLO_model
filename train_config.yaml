@@ -1,0 +1,165 @@
+# YOLO11训练配置文件
+# 根据您的具体需求修改以下参数
+
+# 模型配置
+model:
+  # 模型类型: yolo11n, yolo11s, yolo11m, yolo11l, yolo11x, yolo12n, yolo12s, yolo12m, yolo12l, yolo12x
+  name: "yolo12x"  # 可以改为 "yolo12x" 来训练YOLO12x模型
+
+  # 预训练权重路径 (可选)
+  # 如果不指定，将自动下载对应模型的预训练权重
+  # pretrained: "path/to/your/pretrained/weights.pt"
+
+# 训练参数配置 - 针对无人机红外小目标检测优化
+training:
+  # 基础训练参数
+  epochs: 150                    # 训练轮次 (小目标需要更多轮次)
+  batch_size: 8                  # 批次大小 (适当增加批次大小)
+  image_size: 1024               # 图像尺寸 (增大以更好检测小目标)
+  learning_rate: 0.005           # 初始学习率 (降低学习率提高精度)
+  device: "0"                    # 设备: "0"(GPU), "1"(GPU), "cpu" 或 "0,1"(多GPU)
+  workers: 8                     # 数据加载线程数
+
+  # 学习率参数 - 针对小目标优化
+  lrf: 0.05                      # 最终学习率 = lr0 * lrf (更高的最终学习率)
+  momentum: 0.937                # SGD momentum
+  weight_decay: 0.0001           # 权重衰减 (降低以防止过拟合)
+
+  # 预热参数
+  warmup_epochs: 5.0             # 预热轮次 (增加预热轮次)
+  warmup_momentum: 0.8           # 预热期初始momentum
+  warmup_bias_lr: 0.05           # 预热期偏置学习率 (降低)
+
+  # 损失函数权重 - 专门优化小白点高对比度检测
+  box_loss_gain: 15.0            # 边界框损失权重 (极高，小白点定位精度至关重要)
+  cls_loss_gain: 2.0             # 分类损失权重 (增加，高对比度特征分类应该更容易)
+  cls_positive_weight: 1.0       # 分类正样本权重
+  obj_loss_gain: 2.5             # 目标检测损失权重 (显著增强，小白点存在性检测)
+  obj_positive_weight: 1.2       # 目标检测正样本权重 (增加，提高小白点检出率)
+
+  # IoU和阈值参数 - 小白点高对比度优化
+  iou_threshold: 0.05            # IoU训练阈值 (极低，小白点定位允许更宽松)
+  anchor_threshold: 2.0          # 锚点阈值 (更低，适应更小的目标)
+  focal_gamma: 3.0               # Focal loss gamma (增强，处理难检测的小白点)
+
+  # 其他训练参数
+  save_period: 40                # 每隔多少轮保存一次检查点
+  cache: "ram"                   # 数据缓存: "ram", "disk", 或 False
+  exist_ok: false                # 是否覆盖已存在的实验目录
+  resume: false                  # 是否恢复训练
+  verbose: true                  # 详细输出
+  evaluate: true                 # 训练后评估模型
+
+  # 实验名称
+  experiment_name: "yolo12x_infrared_white_dot_detection"  # 实验名称，专门针对小白点检测
+
+  # 优化器和调度器参数
+  optimizer: "AdamW"             # 优化器: AdamW对小目标更稳定
+  patience: 80                   # 早停耐心值 (小目标需要更多耐心)
+  plots: true                    # 是否生成训练图表
+  rect: true                     # 使用矩形训练 (节省显存且对小目标友好)
+
+  # 模型保存参数
+  save_json: false               # 是否保存COCO格式的评估结果
+  save_hybrid: false             # 是否保存混合版本标签
+
+  # 验证参数
+  val: true                      # 是否在训练期间验证
+  val_conf_threshold: 0.001      # 验证时的置信度阈值
+  val_iou_threshold: 0.6         # 验证时的IoU阈值
+
+  # 传输学习参数
+  freeze: false                  # 是否冻结层 (可以是数字或层名称)
+  multi_scale: true              # 启用多尺度训练 (对小目标检测非常重要)
+
+# 数据增强配置 - 针对"小白点-灰色背景"高对比度目标优化
+augmentation:
+  # HSV增强 (专门强化高对比度小目标的适应性)
+  hsv_h: 0.005                   # 色调增强范围 (极小，红外图像色调基本固定)
+  hsv_s: 0.2                     # 饱和度增强范围 (很低，重点在亮度差异)
+  hsv_v: 0.8                     # 明度增强范围 (显著增加，模拟不同热强度和温度条件)
+
+  # 几何变换 - 专门保护小白点-灰色背景高对比度特征
+  degrees: 2.0                   # 旋转角度范围 (极小，保护小白点的圆形特征)
+  translate: 0.02                # 平移范围 (极小，避免小白点位置过度移动)
+  scale: 0.15                    # 缩放范围 (适度缩放，模拟不同距离下的小白点大小变化)
+  shear: 0.2                     # 剪切角度范围 (极小，保持小白点的高对比度边界)
+  perspective: 0.0003            # 透视变换范围 (极小，避免破坏小白点-背景的对比关系)
+
+  # 翻转 - 保持高对比度特征完整性
+  flipud: 0.4                    # 上下翻转概率 (无人机俯仰变化，小白点仍保持清晰)
+  fliplr: 0.9                    # 左右翻转概率 (高概率，增强小白点位置泛化性)
+
+  # 混合增强 - 专门优化小白点检测场景
+  mosaic: 0.3                    # Mosaic增强概率 (大幅降低，避免复杂场景淹没小白点)
+  mixup: 0.02                    # Mixup增强概率 (极低，完全避免破坏小白点的高对比度特征)
+
+# 类别特定强化参数 - 专门优化小白点-灰色背景中的person检测
+# 类别ID从0开始，对应数据集yaml文件中的names顺序
+# 重点强化person类别的小白点特征检测
+class_specific:
+  # 类别0 (person) - 小白点目标，极致强化
+  0:
+    # 损失权重增强 - 极致强化小白点person检测
+    loss_weight: 5.0             # 极高损失权重，确保小白点person被充分学习
+
+    # 数据增强强度倍数 - 保护小白点特征的适度增强
+    augmentation_scale: 1.8      # 适度增强，避免破坏小白点高对比度特征
+
+    # 最小样本权重 - 确保小白点person样本充分训练
+    min_samples_weight: 2.0      # 高权重，提高小白点person的检出率
+
+    # 学习率倍数 - 略微提高person的学习率，更好地学习小白点特征
+    lr_multiplier: 1.3           # 适度增加学习率，加快小白点特征学习
+
+  # 类别1 (motorcycle) - 次要目标，保持一般强化
+  1:
+    # 损失权重增强
+    loss_weight: 1.2             # 适度增加，避免影响person检测
+
+    # 数据增强强度倍数
+    augmentation_scale: 1.0      # 正常增强
+
+    # 最小样本权重
+    min_samples_weight: 1.0      # 正常权重
+
+    # 学习率倍数
+    lr_multiplier: 1.0           # 正常学习率
+
+  # 示例: 对类别3进行强化 (如果数据集中没有类别3，此配置将被跳过)
+  # 3:
+  #   loss_weight: 3.0
+  #   augmentation_scale: 2.0
+  #   min_samples_weight: 1.5
+  #   lr_multiplier: 0.8
+
+# 数据集配置
+dataset:
+  # 数据集YAML文件路径
+  # 程序会自动读取该文件获取类别信息
+  dataset_yaml: "F:\\wenw\\work\\dataset\\Infrared_dataset_yolo\\dataset.yaml"
+
+  # 数据集根目录 (可选，用于验证路径)
+  root_path: "F:\\wenw\\work\\dataset\\Infrared_dataset_yolo"
+
+# 高级配置 (可选)
+advanced:
+  # 多GPU训练参数
+  multi_gpu:
+    enabled: false                # 是否启用多GPU训练
+    sync_bn: true                 # 是否使用同步BatchNorm
+
+  # 混合精度训练
+  mixed_precision:
+    enabled: true                 # 是否启用混合精度训练
+
+  # 梯度裁剪
+  grad_clip:
+    enabled: false                # 是否启用梯度裁剪
+    max_norm: 10.0               # 最大梯度范数
+
+  # 早停参数
+  early_stopping:
+    enabled: false                # 是否启用早停
+    patience: 50                 # 容忍轮次
+    min_delta: 0.001             # 最小改善幅度
