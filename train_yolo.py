@@ -6,11 +6,37 @@ YOLO11/12训练主程序
 """
 
 import os
+import sys
 import yaml
 import argparse
 import logging
 from pathlib import Path
 from typing import Dict, Any, List
+
+
+def setup_interrupt_handlers():
+    """设置中断处理器，确保DDP训练时能正确终止"""
+    import signal
+    import subprocess
+
+    def emergency_cleanup():
+        """紧急清理函数"""
+        print("\n🚨 紧急终止训练进程...")
+        cleanup_commands = [
+            ['pkill', '-f', 'Ultralytics'],
+            ['pkill', '-f', '_temp_'],
+            ['pkill', '-f', 'yolo'],
+            ['pkill', '-9', '-f', 'python']
+        ]
+
+        for cmd in cleanup_commands:
+            try:
+                subprocess.run(cmd, timeout=3, capture_output=True)
+            except:
+                pass
+        print("✅ 清理完成")
+
+    return emergency_cleanup
 
 try:
     from ultralytics import YOLO
@@ -237,6 +263,12 @@ class YOLOTrainer:
 
             return results
 
+        except KeyboardInterrupt:
+            logger.info("训练被用户中断，正在退出...")
+            # 在多GPU训练中，Ultralytics会自动处理保存
+            logger.info("检查是否保存了部分训练结果...")
+            return None
+
         except Exception as e:
             logger.error(f"训练过程中出现错误: {e}")
             raise
@@ -244,6 +276,52 @@ class YOLOTrainer:
 
 def main():
     """主函数"""
+    import signal
+    import os
+    import threading
+    import time
+
+    def signal_handler(signum, frame):
+        logger.info(f"接收到中断信号 {signum}，正在清理...")
+
+        # 强制终止所有相关进程
+        logger.info("正在终止Ultralytics进程...")
+
+        # 方法1: 终止当前进程组
+        try:
+            os.killpg(os.getpgrp(), signal.SIGTERM)
+        except:
+            pass
+
+        # 方法2: 查找并终止Ultralytics相关进程
+        try:
+            import subprocess
+            subprocess.run(['pkill', '-f', 'Ultralytics'], timeout=5)
+            subprocess.run(['pkill', '-f', '_temp_'], timeout=5)
+        except:
+            pass
+
+        # 等待2秒后强制退出
+        def delayed_exit():
+            time.sleep(2)
+            logger.info("强制退出...")
+            os._exit(1)
+
+        thread = threading.Thread(target=delayed_exit, daemon=True)
+        thread.start()
+
+        sys.exit(0)
+
+    # 注册信号处理器
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # 设置进程组，便于信号传播
+    try:
+        os.setpgrp()
+    except:
+        pass
+
     parser = argparse.ArgumentParser(description='YOLO11/12训练程序')
     parser.add_argument('--config', type=str, default='train_config.yaml',
                        help='训练配置文件路径')
