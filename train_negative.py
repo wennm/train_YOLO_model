@@ -17,28 +17,68 @@ import random
 
 
 def setup_interrupt_handlers():
-    """设置中断处理器，确保DDP训练时能正确终止"""
+    """设置优雅的中断处理器"""
     import signal
     import subprocess
+    import time
+    import threading
 
-    def emergency_cleanup():
-        """紧急清理函数"""
-        print("\n🚨 紧急终止训练进程...")
-        cleanup_commands = [
-            ['pkill', '-f', 'Ultralytics'],
-            ['pkill', '-f', '_temp_'],
-            ['pkill', '-f', 'yolo'],
-            ['pkill', '-9', '-f', 'python']
+    def graceful_cleanup():
+        """优雅的清理函数"""
+        print("\n🛑 接收到中断信号，正在优雅地停止训练...")
+        print("请稍候，正在保存当前训练状态...")
+
+        cleanup_steps = [
+            {
+                'description': '保存训练状态',
+                'command': ['pkill', '-TERM', '-f', 'Ultralytics'],
+                'timeout': 10
+            },
+            {
+                'description': '清理临时文件',
+                'command': ['pkill', '-TERM', '-f', '_temp_'],
+                'timeout': 5
+            }
         ]
 
-        for cmd in cleanup_commands:
+        for step in cleanup_steps:
             try:
-                subprocess.run(cmd, timeout=3, capture_output=True)
-            except:
-                pass
-        print("✅ 清理完成")
+                print(f"  🔄 {step['description']}...")
+                subprocess.run(step['command'], timeout=step['timeout'], capture_output=True)
+                time.sleep(1)  # 给系统一些处理时间
+                print(f"  ✅ {step['description']}完成")
+            except subprocess.TimeoutExpired:
+                print(f"  ⚠️ {step['description']}超时")
+            except Exception as e:
+                print(f"  ⚠️ {step['description']}出现错误: {e}")
 
-    return emergency_cleanup
+        # 等待清理完成后，再检查是否还有顽固进程
+        time.sleep(2)
+
+        # 只有在必要时才使用强制终止
+        try:
+            # 检查是否还有Ultralytics进程在运行
+            result = subprocess.run(['pgrep', '-f', 'Ultralytics'],
+                                  capture_output=True, text=True, timeout=3)
+            if result.returncode == 0:
+                print("  🔄 发现仍在运行的进程，尝试温和终止...")
+                subprocess.run(['pkill', '-TERM', '-f', 'yolo'], timeout=5)
+                time.sleep(3)
+
+                # 最后检查，如果还在运行才使用kill
+                result = subprocess.run(['pgrep', '-f', 'yolo'],
+                                      capture_output=True, text=True, timeout=3)
+                if result.returncode == 0:
+                    print("  ⚠️ 温和终止失败，使用强制终止...")
+                    subprocess.run(['pkill', '-KILL', '-f', 'yolo'], timeout=3)
+            else:
+                print("  ✅ 所有进程已正常终止")
+        except Exception as e:
+            print(f"  ⚠️ 进程检查出现错误: {e}")
+
+        print("✅ 优雅清理完成")
+
+    return graceful_cleanup
 
 try:
     from ultralytics import YOLO
@@ -289,6 +329,12 @@ class YOLONegativeTrainer:
         """开始训练"""
         logger.info("开始支持负样本的YOLO11/12火点检测训练...")
 
+        # 检查磁盘空间
+        self._check_disk_space()
+
+        # 检查系统资源状态
+        self._check_system_resources()
+
         # 首先验证数据集结构
         self.validate_dataset_structure()
 
@@ -310,34 +356,187 @@ class YOLONegativeTrainer:
 
         # 保存训练配置
         config_save_path = save_dir / "train_config.yaml"
-        with open(config_save_path, 'w', encoding='utf-8') as f:
-            yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True)
-        logger.info(f"训练配置已保存到: {config_save_path}")
+        try:
+            with open(config_save_path, 'w', encoding='utf-8') as f:
+                yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True)
+            logger.info(f"训练配置已保存到: {config_save_path}")
+        except Exception as e:
+            logger.error(f"保存配置文件失败: {e}")
+
+        # 启动资源监控
+        self._setup_resource_monitoring()
 
         # 开始训练
         try:
+            logger.info("🚀 开始火点检测训练，使用 Ctrl+C 可以优雅中断")
+            logger.info("💡 资源监控已启动，会在内存/GPU不足时预警")
             results = model.train(**training_args)
 
-            logger.info("训练完成!")
+            logger.info("✅ 火点检测训练完成!")
             logger.info(f"最佳模型保存在: {results.save_dir / 'weights' / 'best.pt'}")
 
             # 评估模型
             if self.config['training'].get('evaluate', True):
-                logger.info("开始模型评估...")
-                metrics = model.val(data=self.config['dataset']['dataset_yaml'])
-                logger.info(f"mAP50: {metrics.box.map50:.4f}")
-                logger.info(f"mAP50-95: {metrics.box.map:.4f}")
+                logger.info("📊 开始模型评估...")
+                try:
+                    metrics = model.val(data=self.config['dataset']['dataset_yaml'])
+                    logger.info(f"mAP50: {metrics.box.map50:.4f}")
+                    logger.info(f"mAP50-95: {metrics.box.map:.4f}")
+                except Exception as e:
+                    logger.error(f"评估过程出现错误: {e}")
 
             return results
 
         except KeyboardInterrupt:
-            logger.info("训练被用户中断，正在退出...")
-            logger.info("检查是否保存了部分训练结果...")
+            logger.info("⏹️  训练被用户中断，正在优雅退出...")
+            logger.info("💾 Ultralytics会自动保存当前训练状态")
+            logger.info("📁 训练日志和权重文件保存在: runs/detect/")
             return None
 
         except Exception as e:
-            logger.error(f"训练过程中出现错误: {e}")
+            logger.error(f"❌ 训练过程中出现错误: {e}")
+            logger.info("🔄 尝试保存当前训练状态...")
             raise
+
+        finally:
+            # 停止资源监控
+            self._stop_resource_monitoring()
+            # 清理资源
+            logger.info("🧹 清理训练资源...")
+            self._cleanup_resources()
+
+    def _check_disk_space(self):
+        """检查磁盘空间"""
+        import shutil
+        try:
+            total, used, free = shutil.disk_usage(".")
+            free_gb = free // (1024**3)
+
+            if free_gb < 5:
+                logger.warning(f"⚠️ 磁盘空间不足，剩余 {free_gb} GB")
+                logger.warning("建议清理磁盘空间后再开始训练")
+            else:
+                logger.info(f"💾 磁盘空间充足，剩余 {free_gb} GB")
+
+        except Exception as e:
+            logger.warning(f"无法检查磁盘空间: {e}")
+
+    def _check_system_resources(self):
+        """检查系统资源状态，预防OOM等系统级中断"""
+        try:
+            import psutil
+            import torch
+
+            logger.info("🔍 检查系统资源状态...")
+
+            # 检查内存使用情况
+            memory = psutil.virtual_memory()
+            used_memory_gb = memory.used / (1024**3)
+            total_memory_gb = memory.total / (1024**3)
+            memory_percent = memory.percent
+
+            logger.info(f"💾 内存使用: {used_memory_gb:.1f}/{total_memory_gb:.1f} GB ({memory_percent:.1f}%)")
+
+            if memory_percent > 95:
+                logger.warning(f"⚠️ 内存使用过高 ({memory_percent:.1f}%)，可能导致OOM")
+                logger.warning("建议：")
+                logger.warning("  - 减少batch size")
+                logger.warning("  - 减少workers数量")
+                logger.warning("  - 关闭其他内存占用程序")
+
+            # 检查GPU内存
+            if torch.cuda.is_available():
+                gpu_count = torch.cuda.device_count()
+                for i in range(gpu_count):
+                    gpu_memory = torch.cuda.get_device_properties(i).total_memory / (1024**3)
+                    gpu_allocated = torch.cuda.memory_allocated(i) / (1024**3)
+                    gpu_cached = torch.cuda.memory_reserved(i) / (1024**3)
+                    gpu_percent = (gpu_allocated / gpu_memory) * 100
+
+                    logger.info(f"🎮 GPU {i}: {gpu_allocated:.1f}/{gpu_memory:.1f} GB 已分配 ({gpu_percent:.1f}%)")
+
+                    if gpu_percent > 95:
+                        logger.warning(f"⚠️ GPU {i} 内存使用过高 ({gpu_percent:.1f}%)")
+                        logger.warning("建议减少batch size或模型大小")
+
+                # 清理GPU缓存
+                torch.cuda.empty_cache()
+
+            # 检查CPU负载
+            cpu_percent = psutil.cpu_percent(interval=1)
+            logger.info(f"🖥️  CPU使用率: {cpu_percent:.1f}%")
+
+            if cpu_percent > 90:
+                logger.warning(f"⚠️ CPU使用率过高 ({cpu_percent:.1f}%)")
+                logger.warning("建议减少workers数量")
+
+        except ImportError:
+            logger.warning("⚠️ 未安装psutil，无法监控系统资源")
+            logger.info("安装命令: pip install psutil")
+        except Exception as e:
+            logger.warning(f"系统资源检查失败: {e}")
+
+    def _setup_resource_monitoring(self):
+        """设置资源监控线程"""
+        import threading
+        import time
+        import psutil
+        import torch
+
+        def resource_monitor():
+            """资源监控函数"""
+            try:
+                while getattr(self, '_monitoring_active', True):
+                    # 检查内存使用
+                    memory = psutil.virtual_memory()
+                    if memory.percent > 95:
+                        logger.warning(f"⚠️ 内存使用危险 ({memory.percent:.1f}%) - 请准备中断训练")
+
+                    # 检查GPU内存
+                    if torch.cuda.is_available():
+                        for i in range(torch.cuda.device_count()):
+                            gpu_memory = torch.cuda.get_device_properties(i).total_memory
+                            gpu_allocated = torch.cuda.memory_allocated(i)
+                            gpu_percent = (gpu_allocated / gpu_memory) * 100
+
+                            if gpu_percent > 95:
+                                logger.error(f"❌ GPU {i} 内存即将耗尽 ({gpu_percent:.1f}%)")
+                                logger.error("⚠️ 系统可能随时中断进程！")
+                                logger.error("建议立即使用 Ctrl+C 优雅退出")
+
+                    time.sleep(30)  # 每30秒检查一次
+
+            except Exception as e:
+                logger.warning(f"资源监控线程出现错误: {e}")
+
+        # 启动监控线程
+        self._monitoring_active = True
+        monitor_thread = threading.Thread(target=resource_monitor, daemon=True)
+        monitor_thread.start()
+        logger.info("🔍 资源监控已启动 (每30秒检查一次)")
+
+    def _stop_resource_monitoring(self):
+        """停止资源监控"""
+        self._monitoring_active = False
+        logger.info("🔍 资源监控已停止")
+
+    def _cleanup_resources(self):
+        """清理训练资源"""
+        try:
+            import gc
+            import torch
+
+            # 清理GPU缓存
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("🗑️ GPU缓存已清理")
+
+            # 强制垃圾回收
+            gc.collect()
+            logger.info("🗑️ 内存垃圾回收完成")
+
+        except Exception as e:
+            logger.warning(f"资源清理过程中出现错误: {e}")
 
 
 def main():
@@ -346,37 +545,38 @@ def main():
     import os
     import threading
     import time
+    import atexit
+
+    # 优雅退出标志
+    global graceful_shutdown_requested
+    graceful_shutdown_requested = False
 
     def signal_handler(signum, frame):
-        logger.info(f"接收到中断信号 {signum}，正在清理...")
-
-        # 强制终止所有相关进程
-        logger.info("正在终止Ultralytics进程...")
-
-        # 方法1: 终止当前进程组
-        try:
-            os.killpg(os.getpgrp(), signal.SIGTERM)
-        except:
-            pass
-
-        # 方法2: 查找并终止Ultralytics相关进程
-        try:
-            import subprocess
-            subprocess.run(['pkill', '-f', 'Ultralytics'], timeout=5)
-            subprocess.run(['pkill', '-f', '_temp_'], timeout=5)
-        except:
-            pass
-
-        # 等待2秒后强制退出
-        def delayed_exit():
-            time.sleep(2)
-            logger.info("强制退出...")
+        global graceful_shutdown_requested
+        if graceful_shutdown_requested:
+            logger.warning("强制终止信号已接收，立即退出...")
             os._exit(1)
 
-        thread = threading.Thread(target=delayed_exit, daemon=True)
-        thread.start()
+        graceful_shutdown_requested = True
+        logger.info(f"接收到中断信号 {signum}，开始优雅退出...")
 
+        # 注册优雅清理函数
+        graceful_cleanup = setup_interrupt_handlers()
+
+        # 执行优雅清理
+        graceful_cleanup()
+
+        # 正常退出
+        logger.info("优雅退出完成")
         sys.exit(0)
+
+    # 注册退出时的清理函数
+    def atexit_handler():
+        """程序正常退出时的清理函数"""
+        if not graceful_shutdown_requested:
+            logger.info("程序正常退出，无需特殊清理")
+
+    atexit.register(atexit_handler)
 
     # 注册信号处理器
     signal.signal(signal.SIGINT, signal_handler)
