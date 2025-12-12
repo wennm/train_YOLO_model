@@ -101,11 +101,11 @@ class YOLODatasetProcessor:
         if not labels_dir.exists():
             raise FileNotFoundError(f"标签目录不存在: {labels_dir}")
 
-        # 获取所有图片文件
+        # 获取所有图片文件（避免重复统计）
         image_files = []
-        for ext in self.config.get('image_extensions', ['.jpg', '.jpeg', '.png', '.bmp']):
+        for ext in self.config.get('image_extensions', ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp']):
+            # 在Windows系统上，glob是大小写不敏感的，所以只需要搜索小写扩展名
             image_files.extend(images_dir.glob(f"*{ext}"))
-            image_files.extend(images_dir.glob(f"*{ext.upper()}"))
 
         # 获取所有标签文件
         label_files = list(labels_dir.glob("*.txt"))
@@ -276,6 +276,12 @@ class YOLODatasetProcessor:
 
         stats_file = self.output_path / "dataset_statistics.txt"
 
+        # 去重统计实际文件数量
+        all_image_files = set()
+        for split_name, data in split_data.items():
+            for img_file in data['images']:
+                all_image_files.add(str(img_file))
+
         with open(stats_file, 'w', encoding='utf-8') as f:
             f.write("YOLO数据集统计信息\n")
             f.write("=" * 50 + "\n\n")
@@ -287,6 +293,7 @@ class YOLODatasetProcessor:
                 f.write(f"{split_name.upper()}: {count} 张图片\n")
 
             f.write(f"\n总计: {total_images} 张图片\n")
+            f.write(f"实际唯一图片数: {len(all_image_files)} 张图片\n")
             f.write(f"划分比例: {self.config['split_ratios']}\n")
             f.write(f"类别数量: {len(self.config['class_mapping'])}\n")
 

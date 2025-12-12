@@ -306,7 +306,13 @@ class YOLOTrainer:
             results = model.train(**training_args)
 
             logger.info("✅ 训练完成!")
-            logger.info(f"最佳模型保存在: {results.save_dir / 'weights' / 'best.pt'}")
+            # 安全处理results可能为None的情况
+            if results and hasattr(results, 'save_dir'):
+                logger.info(f"最佳模型保存在: {results.save_dir / 'weights' / 'best.pt'}")
+            else:
+                # 使用配置中的实验名称构建路径
+                save_dir = Path("runs/detect") / training_args['name']
+                logger.info(f"最佳模型保存在: {save_dir / 'weights' / 'best.pt'}")
 
             # 评估模型
             if self.config['training'].get('evaluate', True):
@@ -523,7 +529,7 @@ def main():
         pass
 
     parser = argparse.ArgumentParser(description='YOLO11/12训练程序')
-    parser.add_argument('--config', type=str, default='train_config.yaml',
+    parser.add_argument('--config', type=str, default='train_config_model6.yaml',
                        help='训练配置文件路径')
     parser.add_argument('--resume', action='store_true',
                        help='恢复训练')
