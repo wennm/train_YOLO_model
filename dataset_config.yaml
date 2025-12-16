@@ -2,24 +2,23 @@
 # 修改下面的参数以适应您的数据集
 
 # 输入路径配置
-input_dir: r"F:\wenw\work\inf_origin"          # 包含images和labels子文件夹的根目录
+input_dir: r"F:\wenw\work\dataset\nanshan-fire-dataset_onlyfire_origin"          # 包含images和labels子文件夹的根目录
 images_subdir: "images"             # 图片子文件夹名称
 labels_subdir: "labels"             # 标签子文件夹名称
 
 # 输出路径配置
-output_dir: r"F:\wenw\work\dataset\Infrared_dataset_yolo"   # 处理后数据集的输出目录
+output_dir: r"F:\wenw\work\dataset\nanshan-fire-dataset_onlyfire"   # 处理后数据集的输出目录
 output_yaml_name: "dataset.yaml"    # YOLO配置文件名称
 
 # 数据划分比例
 # 两个数值: [训练集比例, 验证集比例]
 # 三个数值: [训练集比例, 验证集比例, 测试集比例]
-split_ratios: [0.9, 0.1]           # 默认8:2比例 (训练:验证)
+split_ratios: [0.8, 0.1 ,0.1]           # 默认8:2比例 (训练:验证)
 # split_ratios: [0.7, 0.2, 0.1]    # 示例7:2:1比例 (训练:验证:测试)
 
 # 类别映射 - 根据您的数据集修改
 class_mapping:
-  0: "person"
-  1: "motorcycle"
+  0: "fire"
 
   # 添加更多类别...
   # 3: "traffic_light"

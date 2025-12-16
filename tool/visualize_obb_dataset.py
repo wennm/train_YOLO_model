@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据集标签可视化脚本
-将YOLO格式的标签绘制在图片上，生成了visual版本的可视化图片
+OBB数据集标签可视化脚本
+将YOLO-OBB格式的标签绘制在图片上，生成了visual版本的可视化图片
 支持标准YOLO数据集结构，自动检测是否存在测试集
+OBB格式: class_id x1 y1 x2 y2 x3 y3 x4 y4 (四个角的归一化坐标)
 """
 
 import os
@@ -14,8 +15,8 @@ from typing import List, Tuple, Optional
 import argparse
 
 
-class DatasetVisualizer:
-    """数据集可视化类"""
+class OBBDatasetVisualizer:
+    """OBB数据集可视化类"""
 
     def __init__(self, dataset_path: str, output_path: str):
         """
@@ -41,20 +42,41 @@ class DatasetVisualizer:
     def _detect_dataset_type(self) -> str:
         """
         检测数据集结构类型
-        Returns: 'standard' (train/val/test 直接在根目录) 或 'nested' (train/val/test 在子目录中)
+        Returns: 'nested' (train/val/test 直接在根目录，各自包含images/labels) 或
+                'standard' (images/labels 在根目录，下面有train/val/test子目录)
         """
-        # 检查是否存在 train/val/test 目录
+        # 检查第一种结构：nested (train/, val/, test/ 直接在根目录)
         train_dir = self.dataset_path / "train"
         val_dir = self.dataset_path / "val"
-        test_dir = self.dataset_path / "test"
 
+        # 检查第二种结构：standard (images/, labels/ 在根目录)
         images_dir = self.dataset_path / "images"
+        labels_dir = self.dataset_path / "labels"
 
-        if train_dir.exists() and val_dir.exists():
+        # 第一种结构判断：根目录下有 train/val 目录且这些目录下有 images 子目录
+        if (train_dir.exists() and val_dir.exists() and
+            (train_dir / "images").exists() and (val_dir / "images").exists()):
+            print("[INFO] 检测到第一种结构：train/val/test 目录在根目录")
             return "nested"
-        elif images_dir.exists():
+
+        # 第二种结构判断：根目录下有 images/labels 目录
+        elif (images_dir.exists() and labels_dir.exists() and
+              (images_dir / "train").exists() and (labels_dir / "train").exists()):
+            print("[INFO] 检测到第二种结构：images/labels 目录在根目录，下面有 train/val/test")
+            return "standard"
+
+        # 容错处理：只有一种结构的部分特征
+        elif train_dir.exists() and val_dir.exists():
+            print("[INFO] 检测到第一种结构（部分特征）")
+            return "nested"
+        elif images_dir.exists() and labels_dir.exists():
+            print("[INFO] 检测到第二种结构（部分特征）")
             return "standard"
         else:
+            print(f"[ERROR] 无法识别的数据集结构: {self.dataset_path}")
+            print(f"[ERROR] 请确保数据集符合以下两种结构之一：")
+            print("  第一种结构：dataset/train/images/, dataset/val/images/, dataset/test/images/")
+            print("  第二种结构：dataset/images/train/, dataset/labels/train/, dataset/images/val/, dataset/labels/val/")
             raise ValueError(f"无法识别的数据集结构: {self.dataset_path}")
 
     def _load_class_names(self) -> List[str]:
@@ -108,49 +130,50 @@ class DatasetVisualizer:
         splits = []
 
         if self.dataset_type == "nested":
-            # 检查 train/val/test 目录
+            # 第一种结构：检查 train/val/test 目录
             for split in ['train', 'val', 'test']:
-                if (self.dataset_path / split).exists():
+                split_dir = self.dataset_path / split
+                if split_dir.exists() and (split_dir / "images").exists():
                     splits.append(split)
         else:  # standard
-            # 检查 images/train, images/val, images/test
+            # 第二种结构：检查 images/train, images/val, images/test
             images_dir = self.dataset_path / "images"
+            labels_dir = self.dataset_path / "labels"
             for split in ['train', 'val', 'test']:
-                if (images_dir / split).exists():
+                if ((images_dir / split).exists() and
+                    (labels_dir / split).exists()):
                     splits.append(split)
 
         return splits
 
-    def parse_yolo_bbox_label(self, label_line: str) -> Tuple[int, Tuple[float, float, float, float]]:
+    def parse_yolo_obb_label(self, label_line: str) -> Tuple[int, np.ndarray]:
         """
-        解析YOLO边界框标签行
+        解析YOLO-OBB标签行
 
         Args:
-            label_line: 标签行，格式为 "class_id x_center y_center width height"
+            label_line: 标签行，格式为 "class_id x1 y1 x2 y2 x3 y3 x4 y4"
 
         Returns:
             class_id: 类别ID
-            bbox: 边界框坐标 (x_center, y_center, width, height)
+            points: 四个角的归一化坐标数组 (4, 2)
         """
         parts = label_line.strip().split()
         class_id = int(parts[0])
 
-        # 提取边界框坐标
-        x_center = float(parts[1])
-        y_center = float(parts[2])
-        width = float(parts[3])
-        height = float(parts[4])
+        # 提取8个坐标点
+        coords = list(map(float, parts[1:9]))
+        points = np.array(coords).reshape(-1, 2)  # (4, 2)
 
-        return class_id, (x_center, y_center, width, height)
+        return class_id, points
 
-    def draw_bbox_on_image(self, image: np.ndarray, bbox: Tuple[float, float, float, float],
+    def draw_obb_on_image(self, image: np.ndarray, points: np.ndarray,
                          class_id: int, alpha: float = 0.3) -> np.ndarray:
         """
-        在图片上绘制YOLO边界框标签
+        在图片上绘制OBB标签
 
         Args:
             image: 原始图片
-            bbox: 边界框坐标 (x_center, y_center, width, height) - 归一化坐标
+            points: 四个角的归一化坐标 (4, 2)
             class_id: 类别ID
             alpha: 透明度
 
@@ -158,46 +181,40 @@ class DatasetVisualizer:
             绘制后的图片
         """
         h, w = image.shape[:2]
-        x_center, y_center, width, height = bbox
 
         # 将归一化坐标转换为像素坐标
-        x_center_abs = int(x_center * w)
-        y_center_abs = int(y_center * h)
-        width_abs = int(width * w)
-        height_abs = int(height * h)
-
-        # 计算左上角和右下角坐标
-        x1 = max(0, x_center_abs - width_abs // 2)
-        y1 = max(0, y_center_abs - height_abs // 2)
-        x2 = min(w - 1, x_center_abs + width_abs // 2)
-        y2 = min(h - 1, y_center_abs + height_abs // 2)
+        pixel_points = points.copy()
+        pixel_points[:, 0] = points[:, 0] * w
+        pixel_points[:, 1] = points[:, 1] * h
+        pixel_points = pixel_points.astype(np.int32)
 
         # 获取类别颜色
         color = self.class_colors.get(class_id, (255, 255, 255))
-
         result = image.copy()
 
-        # 绘制半透明矩形填充
+        # 绘制填充的多边形
         overlay = image.copy()
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+        cv2.fillPoly(overlay, [pixel_points], color)
         result = cv2.addWeighted(result, 1-alpha, overlay, alpha, 0)
 
-        # 绘制矩形边框
-        cv2.rectangle(result, (x1, y1), (x2, y2), color, 2)
+        # 绘制多边形边框
+        cv2.polylines(result, [pixel_points], isClosed=True, color=color, thickness=2)
 
         # 绘制类别标签
         class_name = self.class_names[class_id] if class_id < len(self.class_names) else f'class_{class_id}'
 
-        # 计算文本位置
+        # 计算多边形的中心点作为文本位置
+        center_x = int(np.mean(pixel_points[:, 0]))
+        center_y = int(np.mean(pixel_points[:, 1]))
+
+        # 计算文本大小
         text_size = cv2.getTextSize(class_name, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-        text_x = x1
-        text_y = max(y1 - 10, text_size[1] + 5)
+        text_x = center_x - text_size[0] // 2
+        text_y = center_y
 
         # 确保文本框在图片范围内
-        if text_x + text_size[0] + 10 > w:
-            text_x = w - text_size[0] - 10
-        if text_y < 0:
-            text_y = y1 + text_size[1] + 10
+        text_x = max(0, min(text_x, w - text_size[0] - 10))
+        text_y = max(text_size[1] + 5, min(text_y, h - 5))
 
         # 绘制文本背景
         cv2.rectangle(result,
@@ -240,22 +257,22 @@ class DatasetVisualizer:
 
             result_image = image.copy()
 
-            # 绘制每个标签
+            # 绘制每个OBB标签
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
 
                 try:
-                    class_id, bbox = self.parse_yolo_bbox_label(line)
-                    result_image = self.draw_bbox_on_image(result_image, bbox, class_id)
+                    class_id, points = self.parse_yolo_obb_label(line)
+                    result_image = self.draw_obb_on_image(result_image, points, class_id)
                 except Exception as e:
-                    print(f"[WARNING] 解析标签失败 {label_path}: {line} - {e}")
+                    print(f"[WARNING] 解析OBB标签失败 {label_path}: {line} - {e}")
                     continue
 
             # 保存结果
             cv2.imwrite(str(output_path), result_image)
-            print(f"[INFO] 生成可视化图片: {output_path.name}")
+            print(f"[INFO] 生成OBB可视化图片: {output_path.name}")
 
         except Exception as e:
             print(f"[ERROR] 处理失败 {image_path}: {e}")
@@ -271,21 +288,22 @@ class DatasetVisualizer:
 
         # 根据数据集类型设置路径
         if self.dataset_type == "nested":
-            # train/val/test 直接在根目录，各自包含 images/labels
+            # 第一种结构：train/val/test 直接在根目录，各自包含 images/labels
             images_dir = self.dataset_path / split_name / "images"
             labels_dir = self.dataset_path / split_name / "labels"
             output_dir = self.output_path / split_name / "images"
         else:  # standard
-            # 所有图片在 images/train, images/val, images/test
+            # 第二种结构：所有图片在 images/train, images/val, images/test
             images_dir = self.dataset_path / "images" / split_name
             labels_dir = self.dataset_path / "labels" / split_name
             output_dir = self.output_path / "images" / split_name
 
+        # 验证输入路径存在性
         if not images_dir.exists():
             print(f"[ERROR] 图片目录不存在: {images_dir}")
             return
 
-        # 创建输出目录
+        # 创建输出目录（保持与输入相同的结构）
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # 获取所有图片文件
@@ -296,9 +314,18 @@ class DatasetVisualizer:
             image_files.extend(images_dir.glob(f"*{ext.upper()}"))
 
         print(f"[INFO] 找到 {len(image_files)} 张图片")
+        if len(image_files) == 0:
+            print(f"[WARNING] 在 {images_dir} 中没有找到图片文件")
+            return
 
         processed_count = 0
-        for image_file in image_files:
+        skipped_count = 0
+
+        for i, image_file in enumerate(image_files):
+            # 检查是否达到限制（如果有设置的话）
+            if hasattr(self, '_limit') and processed_count >= self._limit:
+                break
+
             # 查找对应的标签文件
             label_file = labels_dir / f"{image_file.stem}.txt"
 
@@ -306,19 +333,57 @@ class DatasetVisualizer:
             output_filename = f"{image_file.stem}_visual{image_file.suffix}"
             output_file = output_dir / output_filename
 
+            # 检查是否已经处理过（避免重复处理）
+            if output_file.exists():
+                print(f"[INFO] 跳过已存在的文件: {output_filename}")
+                skipped_count += 1
+                continue
+
             # 处理图片
             self.process_image(image_file, label_file, output_file)
             processed_count += 1
 
-        print(f"[INFO] {split_name} 数据集处理完成，共处理 {processed_count} 张图片")
+            # 打印进度（每处理100张图片打印一次）
+            if processed_count % 100 == 0:
+                print(f"[INFO] 已处理 {processed_count} 张图片...")
+
+        print(f"[INFO] {split_name} 数据集处理完成")
+        print(f"  - 新处理: {processed_count} 张图片")
+        print(f"  - 跳过已存在: {skipped_count} 张图片")
 
     def visualize_dataset(self):
         """可视化整个数据集"""
-        print("[INFO] 开始数据集标签可视化...")
+        print("[INFO] 开始OBB数据集标签可视化...")
         print(f"[INFO] 输入路径: {self.dataset_path}")
         print(f"[INFO] 输出路径: {self.output_path}")
         print(f"[INFO] 数据集结构类型: {self.dataset_type}")
         print(f"[INFO] 检测到的类别: {self.class_names}")
+
+        # 显示检测到的数据集结构
+        if self.dataset_type == "nested":
+            print("[INFO] 数据集结构:")
+            print("  输入: dataset/")
+            print("        ├── train/images/")
+            print("        ├── train/labels/")
+            print("        ├── val/images/")
+            print("        ├── val/labels/")
+            print("        └── test/(optional)")
+            print("  输出: output/")
+            print("        ├── train/images/")
+            print("        ├── val/images/")
+            print("        └── test/images/(optional)")
+        else:  # standard
+            print("[INFO] 数据集结构:")
+            print("  输入: dataset/")
+            print("        ├── images/train/")
+            print("        ├── labels/train/")
+            print("        ├── images/val/")
+            print("        ├── labels/val/")
+            print("        └── images/test/labels/test/(optional)")
+            print("  输出: output/")
+            print("        ├── images/train/")
+            print("        ├── images/val/")
+            print("        └── images/test/(optional)")
 
         # 复制数据集配置文件
         yaml_files = list(self.dataset_path.glob("*.yaml")) + list(self.dataset_path.glob("*.yml"))
@@ -335,62 +400,64 @@ class DatasetVisualizer:
 
         if not splits:
             print("[ERROR] 未找到有效的数据集分割！")
+            print("[ERROR] 请检查数据集结构是否正确")
             return
 
         # 处理每个分割
+        total_processed = 0
         for split in splits:
+            print(f"\n{'='*50}")
             self.process_dataset_split(split)
+            print(f"{'='*50}")
 
-        print(f"\n[SUCCESS] 数据集可视化完成！")
+        print(f"\n[SUCCESS] OBB数据集可视化完成！")
         print(f"[INFO] 输出目录: {self.output_path}")
-        print("[INFO] 说明:")
-        print("  - 有标签的图片: 绘制了边界框和类别标签")
+        print("[INFO] 输出说明:")
+        print("  - 有标签的图片: 绘制了OBB多边形和类别标签")
         print("  - 无标签的图片: 直接复制原图（负样本）")
         print("  - 每个类别使用不同的颜色进行区分")
+        print("  - 输出文件名格式: 原文件名_visual.jpg")
         print(f"  - 类别数量: {len(self.class_names)}")
+        print("  - OBB格式: class_id x1 y1 x2 y2 x3 y3 x4 y4 (归一化坐标)")
+        print("[INFO] 可以直接查看输出目录中的可视化图片来验证OBB标注质量")
 
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description='标准YOLO数据集标签可视化工具')
-    # parser.add_argument('--input', type=str, default='F:\\wenw\\work\\dataset\\Infrared_dataset_yolo_20251208',
-    #                    help='输入数据集路径（YOLO格式）')
-    # parser.add_argument('--output', type=str, default='F:\\wenw\\work\\dataset\\Infrared_dataset_yolo_20251208-visual',
-    #                    help='输出数据集路径（可视化后的结果）')
-    parser.add_argument('--input', type=str, default='F:\wenw\work\dataset\zhengli_infra',
-                       help='输入数据集路径（YOLO格式）')
-    parser.add_argument('--output', type=str, default='F:\wenw\work\dataset\zhengli_infra-visual',
+    parser = argparse.ArgumentParser(description='YOLO-OBB数据集标签可视化工具')
+    parser.add_argument('--input', type=str,
+                       help='输入数据集路径（YOLO-OBB格式）')
+    parser.add_argument('--output', type=str,
                        help='输出数据集路径（可视化后的结果）')
     parser.add_argument('--limit', type=int, default=None,
                        help='限制处理的图片数量（用于快速测试）')
 
     args = parser.parse_args()
 
+    # 如果没有指定输入输出路径，使用默认值
+    if not args.input:
+        args.input = 'F:\\wenw\\work\\dataset\\dataset_no_game_4class_1212'
+    if not args.output:
+        args.output = f"{args.input}-obb-visual"
+
     # 检查输入路径
     if not Path(args.input).exists():
         print(f"[ERROR] 输入路径不存在: {args.input}")
         return
 
-    print(f"[INFO] 开始可视化YOLO数据集...")
+    print(f"[INFO] 开始可视化YOLO-OBB数据集...")
     print(f"[INFO] 输入路径: {args.input}")
     print(f"[INFO] 输出路径: {args.output}")
     if args.limit:
         print(f"[INFO] 限制处理图片数量: {args.limit}")
 
     # 创建可视化器并执行
-    visualizer = DatasetVisualizer(args.input, args.output)
+    visualizer = OBBDatasetVisualizer(args.input, args.output)
 
-    # 如果设置了限制，添加一个计数器
+    # 如果设置了限制，将其存储为类属性
     if args.limit:
-        count = 0
-        original_process_image = visualizer.process_image
-        def limited_process_image(image_path, label_path, output_path):
-            nonlocal count
-            if count >= args.limit:
-                return
-            count += 1
-            return original_process_image(image_path, label_path, output_path)
-        visualizer.process_image = limited_process_image
+        visualizer._limit = args.limit
+        print(f"[INFO] 全局限制处理图片数量: {args.limit}")
 
     visualizer.visualize_dataset()
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-YOLO11/12训练主程序
-支持自定义配置文件，包括模型选择、训练参数、类别强化等功能
+通用YOLO11/12训练框架
+支持负样本训练，自动处理空标签文件
+可根据不同配置文件调整训练参数，适用于各种目标检测任务
 """
 
 import os
@@ -12,6 +13,8 @@ import argparse
 import logging
 from pathlib import Path
 from typing import Dict, Any, List
+import shutil
+import random
 
 
 def setup_interrupt_handlers():
@@ -90,8 +93,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-class YOLOTrainer:
-    """YOLO11/12训练器类"""
+class UniversalYOLOTrainer:
+    """通用YOLO11/12训练器类
+    支持负样本训练，可根据配置文件调整训练参数
+    适用于各种目标检测任务
+    """
 
     def __init__(self, config_path: str):
         """
@@ -150,6 +156,73 @@ class YOLOTrainer:
 
         logger.info("配置文件验证通过")
 
+    def validate_dataset_structure(self):
+        """验证数据集结构，处理负样本"""
+        dataset_root = Path(self.config['dataset']['root_path'])
+
+        train_images_dir = dataset_root / 'images' / 'train'
+        train_labels_dir = dataset_root / 'labels' / 'train'
+        val_images_dir = dataset_root / 'images' / 'val'
+        val_labels_dir = dataset_root / 'labels' / 'val'
+
+        # 检查目录是否存在
+        for dir_path in [train_images_dir, train_labels_dir, val_images_dir, val_labels_dir]:
+            if not dir_path.exists():
+                logger.warning(f"目录不存在: {dir_path}")
+
+        # 统计负样本数量
+        negative_train_count = self._count_negative_samples(train_labels_dir)
+        negative_val_count = self._count_negative_samples(val_labels_dir)
+
+        logger.info(f"训练集负样本数量: {negative_train_count}")
+        logger.info(f"验证集负样本数量: {negative_val_count}")
+
+        # 检查图像和标签对应关系
+        self._check_image_label_consistency(train_images_dir, train_labels_dir, "训练集")
+        self._check_image_label_consistency(val_images_dir, val_labels_dir, "验证集")
+
+    def _count_negative_samples(self, labels_dir: Path) -> int:
+        """统计负样本数量（空标签文件）"""
+        if not labels_dir.exists():
+            return 0
+
+        negative_count = 0
+        for label_file in labels_dir.glob('*.txt'):
+            if label_file.stat().st_size == 0:
+                negative_count += 1
+
+        return negative_count
+
+    def _check_image_label_consistency(self, images_dir: Path, labels_dir: Path, split_name: str):
+        """检查图像和标签文件的一致性"""
+        if not images_dir.exists() or not labels_dir.exists():
+            logger.warning(f"{split_name}图像或标签目录不存在")
+            return
+
+        # 获取图像和标签文件集合
+        image_files = {f.stem for f in images_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png']}
+        label_files = {f.stem for f in labels_dir.glob('*.txt')}
+
+        # 检查缺失的标签文件（负样本）
+        missing_labels = image_files - label_files
+        if missing_labels:
+            logger.info(f"{split_name}中发现{len(missing_labels)}个图像没有对应标签文件（将作为负样本处理）")
+            # 为这些图像创建空的标签文件
+            for img_name in missing_labels:
+                empty_label_path = labels_dir / f"{img_name}.txt"
+                empty_label_path.touch()
+                logger.debug(f"创建空标签文件: {empty_label_path}")
+
+        # 检查多余的标签文件
+        extra_labels = label_files - image_files
+        if extra_labels:
+            logger.warning(f"{split_name}中发现{len(extra_labels)}个标签文件没有对应的图像")
+
+        logger.info(f"{split_name}统计:")
+        logger.info(f"  图像文件: {len(image_files)}")
+        logger.info(f"  标签文件: {len(label_files)}")
+        logger.info(f"  有效样本: {len(image_files)}")
+
     def get_model_name(self) -> str:
         """获取完整的模型名称"""
         model_config = self.config['model']
@@ -175,7 +248,7 @@ class YOLOTrainer:
             'device': training_config.get('device', '0' if self._has_cuda() else 'cpu'),
             'workers': training_config.get('workers', 8),
             'name': training_config.get('experiment_name', 'yolo_experiment'),
-            'save_period': training_config.get('save_period', -1),  # -1表示只保存最后一个
+            'save_period': training_config.get('save_period', -1),
             'cache': training_config.get('cache', 'ram'),
             'exist_ok': training_config.get('exist_ok', False),
             'resume': training_config.get('resume', False),
@@ -183,13 +256,13 @@ class YOLOTrainer:
             'patience': training_config.get('patience', 50),
             'plots': training_config.get('plots', True),
             'rect': training_config.get('rect', False),
-            'optimizer': training_config.get('optimizer', 'auto'),
+            'optimizer': training_config.get('optimizer', 'SGD'),
             'val': training_config.get('val', True),
             'save_json': training_config.get('save_json', False),
             'freeze': training_config.get('freeze', False),
-            'multi_scale': training_config.get('multi_scale', False),
+            'multi_scale': training_config.get('multi_scale', True),
 
-            # 超参数直接添加到训练参数中
+            # 超参数
             'lrf': self.config['training'].get('lrf', 0.01),
             'momentum': self.config['training'].get('momentum', 0.937),
             'weight_decay': self.config['training'].get('weight_decay', 0.0005),
@@ -209,19 +282,16 @@ class YOLOTrainer:
                 'hsv_h': aug_config.get('hsv_h', 0.015),
                 'hsv_s': aug_config.get('hsv_s', 0.7),
                 'hsv_v': aug_config.get('hsv_v', 0.4),
-                'degrees': aug_config.get('degrees', 0.0),
+                'degrees': aug_config.get('degrees', 10.0),
                 'translate': aug_config.get('translate', 0.1),
                 'scale': aug_config.get('scale', 0.5),
                 'shear': aug_config.get('shear', 0.0),
                 'perspective': aug_config.get('perspective', 0.0),
-                'flipud': aug_config.get('flipud', 0.0),
+                'flipud': aug_config.get('flipud', 0.5),
                 'fliplr': aug_config.get('fliplr', 0.5),
                 'mosaic': aug_config.get('mosaic', 1.0),
                 'mixup': aug_config.get('mixup', 0.0),
-                      })
-
-        # 验证阈值参数现在在验证时设置，不在这里传递
-        # 新版ultralytics不再支持在train时直接设置这些参数
+            })
 
         return args
 
@@ -256,20 +326,21 @@ class YOLOTrainer:
             return False
 
     def create_custom_hyp(self) -> Dict[str, Any]:
-        """创建自定义超参数字典，新版ultralytics不再使用hyp参数"""
-        # 新版ultralytics将超参数直接集成在训练参数中
-        # 这里返回一个空字典，因为我们已经将所有参数包含在setup_training_args中
+        """创建自定义超参数字典"""
         return {}
 
     def train(self):
         """开始训练"""
-        logger.info("开始YOLO11/12模型训练...")
+        logger.info("开始通用YOLO11/12训练...")
 
         # 检查磁盘空间
         self._check_disk_space()
 
         # 检查系统资源状态
         self._check_system_resources()
+
+        # 首先验证数据集结构
+        self.validate_dataset_structure()
 
         # 加载模型
         model_name = self.get_model_name()
@@ -335,7 +406,6 @@ class YOLOTrainer:
         except Exception as e:
             logger.error(f"❌ 训练过程中出现错误: {e}")
             logger.info("🔄 尝试保存当前训练状态...")
-            # 这里可以添加紧急保存逻辑
             raise
 
         finally:
@@ -406,7 +476,7 @@ class YOLOTrainer:
             cpu_percent = psutil.cpu_percent(interval=1)
             logger.info(f"🖥️  CPU使用率: {cpu_percent:.1f}%")
 
-            if cpu_percent > 95:
+            if cpu_percent > 90:
                 logger.warning(f"⚠️ CPU使用率过高 ({cpu_percent:.1f}%)")
                 logger.warning("建议减少workers数量")
 
@@ -528,8 +598,8 @@ def main():
     except:
         pass
 
-    parser = argparse.ArgumentParser(description='YOLO11/12训练程序')
-    parser.add_argument('--config', type=str, default='train_config_model6.yaml',
+    parser = argparse.ArgumentParser(description='通用YOLO11/12训练框架')
+    parser.add_argument('--config', type=str, default='train_config_model2.yaml',
                        help='训练配置文件路径')
     parser.add_argument('--resume', action='store_true',
                        help='恢复训练')
@@ -541,12 +611,12 @@ def main():
     # 检查配置文件是否存在
     if not os.path.exists(args.config):
         print(f"配置文件不存在: {args.config}")
-        print("请创建train_config.yaml文件或使用--config指定配置文件路径")
+        print("请创建train_config_model2.yaml文件或使用--config指定配置文件路径")
         return
 
     try:
         # 创建训练器
-        trainer = YOLOTrainer(args.config)
+        trainer = UniversalYOLOTrainer(args.config)
 
         # 如果指定了恢复训练
         if args.resume:
