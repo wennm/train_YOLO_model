@@ -1,5 +1,5 @@
-# 单类别火点检测YOLO训练配置文件
-# 专门针对fire检测的优化配置
+# 单类别火点检测YOLO训练配置文件 - Adam优化器版本
+# 专门针对fire检测的优化配置，使用Adam优化器
 
 # 模型配置
 model:
@@ -9,25 +9,31 @@ model:
   # 预训练权重路径 (可选)
   # pretrained: ""  # 留空表示使用官方预训练权重
 
-# 训练参数配置 - 针对单类别火点检测优化
+# 训练参数配置 - 针对单类别火点检测优化 (Adam优化器)
 training:
   # 基础训练参数
   epochs: 150                    # 单类别可以适当增加训练轮次
   batch_size: 3                 # 单类别可以增大批次大小
   image_size: 928                # 图像尺寸
-  learning_rate: 0.01            # 初始学习率
+  learning_rate: 0.001           # 初始学习率 (Adam通常使用更小的学习率)
   device: "0,1,2"                # 设备: "0"(GPU), "1"(GPU), "cpu" 或 "0,1"(多GPU)
   workers: 8                     # 数据加载线程数
 
-  # 学习率参数
+  # 学习率参数 - Adam优化器专用
   lrf: 0.01                      # 最终学习率 = lr0 * lrf
-  momentum: 0.937                # SGD momentum
-  weight_decay: 0.0005           # 权重衰减
+  momentum: 0.9                  # Adam的beta1参数 (建议0.9)
+  weight_decay: 0.01             # 权重衰减 (Adam通常需要更大的权重衰减)
 
-  # 预热参数
-  warmup_epochs: 3.0             # 预热轮次
+  # Adam优化器特定参数
+  beta1: 0.9                     # Adam的beta1参数
+  beta2: 0.999                   # Adam的beta2参数
+  epsilon: 1e-8                  # Adam的epsilon参数，防止除零错误
+  amsgrad: false                 # 是否使用AMSGrad变体
+
+  # 预热参数 - Adam通常需要更短的预热
+  warmup_epochs: 2.0             # 预热轮次 (Adam可以减少预热)
   warmup_momentum: 0.8           # 预热期初始momentum
-  warmup_bias_lr: 0.1            # 预热期偏置学习率
+  warmup_bias_lr: 0.05           # 预热期偏置学习率 (降低以适应Adam)
 
   # 损失函数权重 - 针对单类别火点检测优化
   box_loss_gain: 7.5             # 边界框损失权重
@@ -48,11 +54,13 @@ training:
   evaluate: true                 # 训练后评估模型
 
   # 实验名称
-  experiment_name: "single_class_fire_detection"
+  experiment_name: "single_class_fire_detection_adam"
 
-  # 优化器和调度器参数
-  optimizer: "SGD"               # 优化器: SGD通常对火点检测效果更好
-  patience: 50                   # 早停耐心值
+  # 优化器和调度器参数 - Adam配置
+  optimizer: "Adam"              # 使用Adam优化器
+  optimizer_type: "Adam"         # 明确指定Adam优化器类型
+  scheduler: "cosine"            # Adam配合余弦学习率调度器效果更好
+  patience: 50                   # 早停耐心值 (Adam可能需要更长的耐心值)
   plots: true                    # 是否生成训练图表
   rect: true                     # 使用矩形训练 (节省显存)
 
@@ -69,29 +77,30 @@ training:
   freeze: false                  # 是否冻结层 (可以是数字或层名称)
   multi_scale: true              # 启用多尺度训练 (对火点检测很重要)
 
-# 数据增强配置 - 针对单类别火点检测优化
+# 数据增强配置 - 针对单类别火点检测优化 (Adam通常可以处理更强的增强)
 augmentation:
   # HSV增强 (火点检测专用)
   hsv_h: 0.015                   # 色调增强范围 (火点色调变化较小)
-  hsv_s: 0.7                     # 饱和度增强范围
-  hsv_v: 0.4                     # 明度增强范围 (对火点检测重要)
+  hsv_s: 0.8                     # 饱和度增强范围 (Adam可以处理更强的增强)
+  hsv_v: 0.5                     # 明度增强范围 (对火点检测重要)
 
   # 几何变换
-  degrees: 15.0                  # 旋转角度范围 (单类别可以更大)
-  translate: 0.15                # 平移范围
-  scale: 0.6                     # 缩放范围
-  shear: 2.0                     # 剪切角度范围
-  perspective: 0.0               # 透视变换范围
+  degrees: 20.0                  # 旋转角度范围 (Adam可以处理更大的变换)
+  translate: 0.2                 # 平移范围 (增加范围)
+  scale: 0.7                     # 缩放范围 (增加范围)
+  shear: 3.0                     # 剪切角度范围 (增加范围)
+  perspective: 0.001             # 透视变换范围 (轻微增加)
 
   # 翻转
   flipud: 0.5                    # 上下翻转概率
   fliplr: 0.5                    # 左右翻转概率
 
-  # 混合增强
+  # 混合增强 - Adam可以处理更强的增强
   mosaic: 1.0                    # Mosaic增强概率
-  mixup: 0.0                     # Mixup增强概率 (火点检测不建议使用mixup)
+  mixup: 0.1                     # Mixup增强概率 (Adam可以处理少量mixup)
+  copy_paste: 0.1                # Copy-paste增强概率
 
-# 单类别火点检测特定强化参数
+# 单类别火点检测特定强化参数 - Adam优化器专用
 # 类别ID为0，0=fire
 class_specific:
   # 类别0 (fire) - 火焰检测
@@ -100,7 +109,7 @@ class_specific:
     loss_weight: 1.0             # 单类别使用标准权重
 
     # 数据增强强度倍数
-    augmentation_scale: 1.2      # 增强数据增强
+    augmentation_scale: 1.3      # 增强数据增强 (Adam可以处理更强的增强)
 
     # 最小样本权重
     min_samples_weight: 1.0      # 标准权重
@@ -120,40 +129,53 @@ dataset:
   negative_samples:
     enabled: true                # 是否启用负样本支持
     auto_create_labels: true     # 是否自动为缺失标签的图像创建空标签文件
-    negative_ratio: 0.2          # 负样本比例控制 (单类别可以适当降低)
+    negative_ratio: 0.25         # 负样本比例控制 (Adam可以处理稍高的负样本比例)
 
-# 高级配置 (可选)
+# 高级配置 (可选) - Adam优化器专用
 advanced:
   # 多GPU训练参数
   multi_gpu:
     enabled: true                # 是否启用多GPU训练
-    sync_bn: true                # 是否使用同步BatchNorm
+    sync_bn: true                # 是否使用同步BatchNorm (Adam推荐使用)
 
   # 混合精度训练
   mixed_precision:
-    enabled: true                # 是否启用混合精度训练
+    enabled: true                # 是否启用混合精度训练 (Adam配合混合精度效果很好)
 
-  # 梯度裁剪
+  # 梯度裁剪 - Adam通常需要梯度裁剪
   grad_clip:
-    enabled: false               # 是否启用梯度裁剪
-    max_norm: 10.0              # 最大梯度范数
+    enabled: true                # 启用梯度裁剪 (Adam推荐)
+    max_norm: 1.0               # 更保守的梯度裁剪值
 
-  # 早停参数
+  # 早停参数 - Adam专用
   early_stopping:
-    enabled: false               # 是否启用早停
-    patience: 30                 # 容忍轮次
+    enabled: true                # Adam推荐启用早停
+    patience: 35                 # 容忍轮次 (Adam可能需要更长的耐心值)
     min_delta: 0.001             # 最小改善幅度
+
+  # 学习率调度器 - Adam专用
+  lr_scheduler:
+    type: "cosine"               # 余弦退火调度器
+    min_lr: 1e-6                 # 最小学习率
+    T_max: 100                   # 余弦退火周期
 
   # 负样本特殊处理
   negative_sample_handling:
     # 空标签文件处理策略
     empty_label_strategy: "keep" # "keep"保留, "remove"移除, "synthesize"合成
 
-    # 负样本数据增强
+    # 负样本数据增强 - Adam可以处理更强的增强
     negative_augmentation:
       enabled: true              # 是否对负样本进行特殊增强
-      brightness_range: 0.3      # 亮度变化范围
-      contrast_range: 0.2        # 对比度变化范围
+      brightness_range: 0.4      # 亮度变化范围 (增加)
+      contrast_range: 0.3        # 对比度变化范围 (增加)
+      gaussian_blur: 0.1         # 高斯模糊概率
 
     # 负样本采样策略
     sampling_strategy: "uniform" # "uniform"均匀, "weighted"加权
+
+  # Adam优化器监控配置
+  adam_monitoring:
+    monitor_gradients: true       # 监控梯度
+    gradient_norm_threshold: 10.0 # 梯度范数阈值
+    weight_decay_monitoring: true # 监控权重衰减效果

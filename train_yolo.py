@@ -599,11 +599,11 @@ def main():
         pass
 
     parser = argparse.ArgumentParser(description='通用YOLO11/12训练框架')
-    parser.add_argument('--config', type=str, default='train_config_model2.yaml',
+    parser.add_argument('--config', type=str, default='config/train_config_model8.5.yaml',
                        help='训练配置文件路径')
     parser.add_argument('--resume', action='store_true',
                        help='恢复训练')
-    parser.add_argument('--device', type=str, default=0,
+    parser.add_argument('--device', type=str, default="0,1,2",
                        help='指定设备，如0,1,2,3或cpu')
 
     args = parser.parse_args()

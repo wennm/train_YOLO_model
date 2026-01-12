@@ -4,7 +4,7 @@
 # 模型配置
 model:
   # 模型类型: yolo11n, yolo11s, yolo11m, yolo11l, yolo11x, yolo12n, yolo12s, yolo12m, yolo12l, yolo12x
-  name: "yolo12x"  # 可以改为 "yolo12x" 来训练YOLO12x模型
+  name: "yolo11x"  # 可以改为 "yolo12x" 来训练YOLO12x模型
 
   # 预训练权重路径 (可选)
   # 断点训练：使用更稳定的epoch40检查点
@@ -14,8 +14,8 @@ model:
 training:
   # 基础训练参数
   epochs: 150                    # 训练轮次 (小目标需要更多轮次)
-  batch_size: 3                  # 批次大小 (每个GPU 2，3个GPU总共6)
-  image_size: 928               # 图像尺寸 (增大以更好检测小目标)
+  batch_size: 12                  # 批次大小 (每个GPU 2，3个GPU总共6)
+  image_size: 1280               # 图像尺寸 (增大以更好检测小目标)
   learning_rate: 0.005           # 初始学习率 (降低学习率提高精度)
   device: "0,1,2"                    # 设备: "0"(GPU), "1"(GPU), "cpu" 或 "0,1"(多GPU)
   workers: 8                     # 数据加载线程数
@@ -138,6 +138,7 @@ class_specific:
 dataset:
   # 数据集YAML文件路径
   # 程序会自动读取该文件获取类别信息
+  # dataset_yaml: "/media/wensiye/dataset/Infrared_dataset_yolo/dataset.yaml"
   dataset_yaml: "/media/wensiye/dataset/Infrared_dataset_yolo/dataset.yaml"
 
   # 数据集根目录 (可选，用于验证路径)

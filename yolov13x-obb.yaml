@@ -1,0 +1,8 @@
+# YOLOv13x-OBB Model Configuration
+# 基于yolov13-obb.yaml，使用'x' scale (Extra Large)
+
+# 继承基础配置并设置scale为x
+scales: 'x'
+
+# 其他参数由yolov13-obb.yaml定义
+nc: 8 # number of classes (会被数据集配置覆盖)

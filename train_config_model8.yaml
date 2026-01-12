@@ -1,0 +1,142 @@
+# YOLO11训练配置文件 - 摩托车检测专用配置
+# 针对无人机红外场景的人骑摩托车目标检测优化
+
+# 模型配置
+model:
+  # 模型类型: yolo11n, yolo11s, yolo11m, yolo11l, yolo11x, yolo12n, yolo12s, yolo12m, yolo12l, yolo12x
+  name: "yolo12x"  # 可以改为 "yolo12x" 来训练YOLO12x模型
+
+  # 预训练权重路径 (可选)
+  # pretrained: ""
+
+# 训练参数配置 - 针对无人机红外摩托车检测优化
+training:
+  # 基础训练参数
+  epochs: 150                    # 训练轮次
+  batch_size: 3                  # 批次大小 (每个GPU 2，3个GPU总共6)
+  image_size: 928               # 图像尺寸
+  learning_rate: 0.005           # 初始学习率
+  device: "0,1,2"                    # 设备: "0"(GPU), "1"(GPU), "cpu" 或 "0,1"(多GPU)
+  workers: 2                     # 数据加载线程数
+
+  # 学习率参数
+  lrf: 0.05                      # 最终学习率 = lr0 * lrf
+  momentum: 0.937                # SGD momentum
+  weight_decay: 0.0001           # 权重衰减
+
+  # 预热参数
+  warmup_epochs: 5.0             # 预热轮次
+  warmup_momentum: 0.8           # 预热期初始momentum
+  warmup_bias_lr: 0.05           # 预热期偏置学习率
+
+  # 损失函数权重 - 针对摩托车(白+黑双色特征)优化
+  box_loss_gain: 12.0            # 边界框损失权重 (降低，摩托车目标更大，定位相对容易)
+  cls_loss_gain: 2.5             # 分类损失权重 (增加，白黑双色特征需要更强的分类能力)
+  cls_positive_weight: 1.0       # 分类正样本权重
+  obj_loss_gain: 2.0             # 目标检测损失权重 (适度降低，摩托车目标更明显)
+  obj_positive_weight: 1.0       # 目标检测正样本权重 (正常值)
+
+  # IoU和阈值参数 - 摩托车目标优化
+  iou_threshold: 0.1             # IoU训练阈值 (提高，摩托车目标更大，定位要求更严格)
+  anchor_threshold: 2.5          # 锚点阈值 (提高，适应更大的目标)
+  focal_gamma: 2.5               # Focal loss gamma (降低，摩托车检测难度相对较低)
+
+  # 其他训练参数
+  save_period: -1                # 每隔多少轮保存一次检查点  # -1表示不保存中间检查点，只保存best.pt和last.pt
+  cache: "disk"                   # 数据缓存: "ram", "disk", 或 False
+  exist_ok: false                # 是否覆盖已存在的实验目录
+  resume: false                   # 是否恢复训练
+  verbose: true                  # 详细输出
+  evaluate: false                 # 训练后评估模型
+
+  # 实验名称
+  experiment_name: "model8_yolo12x_infrared_motorcycle_detection"  # 摩托车检测实验名称
+
+  # 优化器和调度器参数
+  optimizer: "AdamW"             # 优化器: AdamW
+  patience: 80                   # 早停耐心值
+  plots: true                    # 是否生成训练图表
+  rect: true                     # 使用矩形训练
+
+  # 模型保存参数
+  save_json: false               # 是否保存COCO格式的评估结果
+  save_hybrid: false             # 是否保存混合版本标签
+
+  # 验证参数
+  val: true                      # 是否在训练期间验证
+  val_conf_threshold: 0.001      # 验证时的置信度阈值
+  val_iou_threshold: 0.6         # 验证时的IoU阈值
+
+  # 传输学习参数
+  freeze: false                  # 是否冻结层 (可以是数字或层名称)
+  multi_scale: true              # 启用多尺度训练
+
+# 数据增强配置 - 针对"白色人+黑色摩托车"双色特征优化
+augmentation:
+  # HSV增强 (重点保护白黑双色特征)
+  hsv_h: 0.01                    # 色调增强范围 (极小，保持红外图像色调)
+  hsv_s: 0.3                     # 饱和度增强范围 (增加，白黑对比度需要强化)
+  hsv_v: 0.7                     # 明度增强范围 (适度降低，避免破坏白黑边界)
+
+  # 几何变换 - 保护摩托车形状和双色特征
+  degrees: 3.0                   # 旋转角度范围 (适度增加，摩托车有方向性)
+  translate: 0.03                # 平移范围 (适度增加)
+  scale: 0.2                     # 缩放范围 (增加，模拟不同距离的摩托车大小)
+  shear: 0.3                     # 剪切角度范围 (适度增加，摩托车形状变化更多样)
+  perspective: 0.0005            # 透视变换范围 (适度增加)
+
+  # 翻转 - 保持双色特征完整性
+  flipud: 0.5                    # 上下翻转概率
+  fliplr: 0.9                    # 左右翻转概率
+
+  # 混合增强 - 摩托车检测优化
+  mosaic: 0.4                    # Mosaic增强概率 (适度增加，摩托车目标更大更难被淹没)
+  mixup: 0.03                    # Mixup增强概率 (极低，避免混淆白黑双色特征)
+
+# 类别特定强化参数 - 专门优化摩托车检测(白色人+黑色摩托车)
+# 单类别检测：只有motorcycle类别
+class_specific:
+  # 类别0 (motorcycle) - 唯一检测目标
+  0:
+    # 损失权重增强 - 强化摩托车检测
+    loss_weight: 3.0             # 适度损失权重，单类别检测无需过高
+
+    # 数据增强强度倍数 - 保护白黑双色特征
+    augmentation_scale: 1.5      # 适度增强，避免破坏白黑边界
+
+    # 最小样本权重 - 确保摩托车样本充分训练
+    min_samples_weight: 1.5      # 高权重，提高摩托车的检出率
+
+    # 学习率倍数 - 提高摩托车的学习率
+    lr_multiplier: 1.2           # 适度增加学习率，加快白黑双色特征学习
+
+# 数据集配置
+dataset:
+  # 数据集YAML文件路径
+  # 程序会自动读取该文件获取类别信息
+  dataset_yaml: "/home/media/wensiye/dataset/infrared_1230_onlymotorcycle_processor/dataset.yaml"
+
+  # 数据集根目录 (可选，用于验证路径)
+  root_path: "/home/media/wensiye/dataset/infrared_1230_onlymotorcycle_processor"
+
+# 高级配置 (可选)
+advanced:
+  # 多GPU训练参数
+  multi_gpu:
+    enabled: true                # 是否启用多GPU训练
+    sync_bn: true                 # 是否使用同步BatchNorm
+
+  # 混合精度训练
+  mixed_precision:
+    enabled: true                 # 是否启用混合精度训练
+
+  # 梯度裁剪
+  grad_clip:
+    enabled: false                # 是否启用梯度裁剪
+    max_norm: 10.0               # 最大梯度范数
+
+  # 早停参数
+  early_stopping:
+    enabled: false                # 是否启用早停
+    patience: 50                 # 容忍轮次
+    min_delta: 0.001             # 最小改善幅度

@@ -1,0 +1,128 @@
+# YOLO12x-OBB训练配置文件 - 8类交通事故检测（类别不平衡优化版）
+# 用于旋转目标检测(Oriented Bounding Box)训练
+#
+# 数据集分布特点：
+# - 总标签数：8810
+# - 样本最多：pedestrian (39.17%), accident (22.97%), car (16.06%)
+# - 样本最少：motorcycle accident (1.71%), police motorcycle (2.54%), motorcycle (5.19%)
+#
+# 类别说明（按重要性排序，[样本占比], [权重]）：
+# 0: accident - 交通事故 [22.97%, 权重:1.0] ✅ 样本充足
+# 4: motorcycle accident - 摩托车事故 [1.71%, 权重:5.0] ⚠️ 严重样本不足（第2重要）
+# 1: pedestrian - 行人 [39.17%, 权重:0.6] ✅ 样本充足，降低权重避免主导训练
+# 5: large vehicle - 大型车辆 [3.27%, 权重:3.5] ⚠️ 严重样本不足（第4重要）
+# 6: Traffic Police - 交警 [9.08%, 权重:1.2] ⚠️ 样本偏少（第5重要）
+# 7: police motorcycle - 警用摩托 [2.54%, 权重:4.0] ⚠️ 严重样本不足（第6重要）
+# 2: motorcycle - 摩托车 [5.19%, 权重:2.0] ⚠️ 样本较少（第7重要）
+# 3: car - 汽车 [16.06%, 权重:0.7] ✅ 样本充足，降低权重（最不重要）
+
+# 类别权重配置
+class_weights: [1.0, 0.8, 2.0, 0.7, 5.0, 3.5, 1.2, 4.0]
+# 如果使用自动计算（基于类别分布）:
+class_counts: [2024, 3451, 457, 1415, 151, 288, 800, 224]  # 对应类别0-7的样本数
+
+model:
+  name: "yolo12x"             # YOLO12x-obb模型
+
+training:
+  task: "obb"                  # 任务类型: obb=旋转框检测
+  epochs: 300                  # 增加训练轮数以充分学习小样本类别
+  batch_size: 6                # 每个GPU的batch size（根据显存调整）
+  image_size: 1184
+  learning_rate: 0.0005        # 降低初始学习率，提高训练稳定性
+  device: "0,1,2"              # GPU设备号，多GPU用"0,1,2"
+  workers: 4                   # 数据加载线程数
+
+  # 学习率参数
+  lrf: 0.01                    # 最终学习率 = lr0 * lrf
+  momentum: 0.937
+  weight_decay: 0.0005
+
+  # 预热参数 - 延长预热期以稳定小样本类别的学习
+  warmup_epochs: 10.0          # 从5.0增加到10.0
+  warmup_momentum: 0.8
+  warmup_bias_lr: 0.05
+
+  # 损失函数权重 - 针对类别不平衡优化
+  box_loss_gain: 7.5           # 保持框损失权重
+  cls_loss_gain: 1.0           # 从0.5提高到1.0，强化分类任务
+  cls_positive_weight: 2.0     # 从1.0提高到2.0，增强正样本权重
+  obj_loss_gain: 1.0
+  obj_positive_weight: 1.0
+
+  # IoU和阈值 - 针对 OBB 优化
+  iou_threshold: 0.2           # 降低IoU阈值，提高召回率（对小样本类别重要）
+  anchor_threshold: 4.0
+  focal_gamma: 2.0             # 从1.5提高到2.0，增强Focal Loss效果，聚焦难分样本
+
+  # 其他训练参数
+  save_period: -1              # 保存周期，-1表示只保存best和last
+  cache: "disk"                # 缓存选项: ram/disk/false
+  exist_ok: false              # 是否允许覆盖已存在的实验目录
+  resume: false                # 是否恢复训练
+  verbose: true
+  evaluate: true               # 训练完成后是否评估
+
+  experiment_name: "model3_yolo12x_obb_8class_accident_balanced_v1.0"
+
+  optimizer: "AdamW"           # 优化器: AdamW对不平衡数据集更稳定
+  patience: 60                 # 从50增加到60，给小样本类别更多学习时间
+  plots: true                  # 是否绘制训练曲线
+  rect: false                  # 矩形训练（OBB建议设为false）
+
+  save_json: false
+  save_hybrid: false
+
+  val: true                    # 是否验证
+  val_conf_threshold: 0.001    # 降低验证置信度阈值，便于检测小样本类别
+  val_iou_threshold: 0.5       # 从0.6降低到0.5，提高召回率
+
+  freeze: false
+  multi_scale: false           # OBB建议关闭多尺度训练
+
+# 数据增强配置 - 针对类别不平衡和OBB优化
+augmentation:
+  hsv_h: 0.015                 # 色调增强
+  hsv_s: 0.7                   # 从0.6提高到0.7，增强颜色变化，提高泛化
+  hsv_v: 0.7                   # 从0.6提高到0.7，增强亮度变化
+
+  # OBB任务的关键增强参数 - 增强以改善小样本类别学习
+  degrees: 10.0                # 从5.0提高到10.0，增强旋转多样性
+  translate: 0.1               # 从0.05提高到0.1，增强平移变化
+  scale: 0.5                   # 从0.7降低到0.5，增加尺度变化范围
+  shear: 2.0                   # 从0.2提高到2.0，大幅增强剪切变换
+  perspective: 0.0             # 透视变换
+
+  flipud: 0.0                  # 上下翻转
+  fliplr: 0.5                  # 左右翻转
+
+  mosaic: 1.0                  # Mosaic增强（保持）
+  mixup: 0.15                  # 从0.05提高到0.15，增强样本混合
+  copy_paste: 0.3              # 从0.1提高到0.3，显著增强copy-paste
+
+dataset:
+  dataset_yaml: "/home/media/wensiye/dataset/dataset_no_game_8class_1231/dataset_oversampled.yaml"
+  root_path: "/home/media/wensiye/dataset/dataset_no_game_8class_1231"
+
+advanced:
+  multi_gpu:
+    enabled: true             # 单GPU设为false，多GPU设为true
+    sync_bn: true             # 同步BatchNorm（多GPU时启用）
+
+  mixed_precision:
+    enabled: true              # 混合精度训练
+
+  grad_clip:
+    enabled: true
+    max_norm: 10.0             # 梯度裁剪
+
+  early_stopping:
+    enabled: true
+    patience: 50               # 从30提高到50，给小样本类别更多学习机会
+    min_delta: 0.0005          # 从0.001降低到0.0005，更精细的改进检测
+
+# OBB特定说明
+# 标签格式: class_id x1 y1 x2 y2 x3 y3 x4 y4
+# - class_id: 类别ID (0-7)
+# - x1,y1,x2,y2,x3,y3,x4,y4: 四个角点的归一化坐标 (0-1)
+# - 四个点建议按顺时针或逆时针顺序排列

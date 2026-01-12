@@ -1,0 +1,142 @@
+# YOLO11训练配置文件 - 摩托车检测专用配置
+# 针对正常RGB摄像头场景的人骑摩托车目标检测优化
+
+# 模型配置
+model:
+  # 模型类型: yolo11n, yolo11s, yolo11m, yolo11l, yolo11x, yolo12n, yolo12s, yolo12m, yolo12l, yolo12x
+  name: "yolo12x"  # 可以改为 "yolo12x" 来训练YOLO12x模型
+
+  # 预训练权重路径 (可选)
+  # pretrained: ""
+
+# 训练参数配置 - 针对正常RGB摄像头摩托车检测优化
+training:
+  # 基础训练参数
+  epochs: 150                    # 训练轮次
+  batch_size: 3                  # 批次大小 (每个GPU 2，3个GPU总共6)
+  image_size: 1280               # 图像尺寸
+  learning_rate: 0.005           # 初始学习率
+  device: "0,1,2"                    # 设备: "0"(GPU), "1"(GPU), "cpu" 或 "0,1"(多GPU)
+  workers: 2                     # 数据加载线程数
+
+  # 学习率参数
+  lrf: 0.05                      # 最终学习率 = lr0 * lrf
+  momentum: 0.937                # SGD momentum
+  weight_decay: 0.0001           # 权重衰减
+
+  # 预热参数
+  warmup_epochs: 5.0             # 预热轮次
+  warmup_momentum: 0.8           # 预热期初始momentum
+  warmup_bias_lr: 0.05           # 预热期偏置学习率
+
+  # 损失函数权重 - 针对正常RGB摄像头摩托车检测优化
+  box_loss_gain: 10.0            # 边界框损失权重 (标准值，RGB图像特征更丰富)
+  cls_loss_gain: 1.5             # 分类损失权重 (降低，RGB图像颜色信息丰富，分类更容易)
+  cls_positive_weight: 1.0       # 分类正样本权重
+  obj_loss_gain: 2.5             # 目标检测损失权重 (标准值)
+  obj_positive_weight: 1.0       # 目标检测正样本权重 (正常值)
+
+  # IoU和阈值参数 - RGB图像摩托车目标优化
+  iou_threshold: 0.2             # IoU训练阈值 (标准值)
+  anchor_threshold: 4.0          # 锚点阈值 (标准值)
+  focal_gamma: 1.5               # Focal loss gamma (标准值，RGB图像检测难度适中)
+
+  # 其他训练参数
+  save_period: -1                # 每隔多少轮保存一次检查点  # -1表示不保存中间检查点，只保存best.pt和last.pt
+  cache: "disk"                   # 数据缓存: "ram", "disk", 或 False
+  exist_ok: false                # 是否覆盖已存在的实验目录
+  resume: false                   # 是否恢复训练
+  verbose: true                  # 详细输出
+  evaluate: false                 # 训练后评估模型
+
+  # 实验名称
+  experiment_name: "model8.5_yolo12x_rgb_motorcycle_detection"  # RGB摄像头摩托车检测实验名称
+
+  # 优化器和调度器参数
+  optimizer: "AdamW"             # 优化器: AdamW
+  patience: 80                   # 早停耐心值
+  plots: true                    # 是否生成训练图表
+  rect: true                     # 使用矩形训练
+
+  # 模型保存参数
+  save_json: false               # 是否保存COCO格式的评估结果
+  save_hybrid: false             # 是否保存混合版本标签
+
+  # 验证参数
+  val: true                      # 是否在训练期间验证
+  val_conf_threshold: 0.001      # 验证时的置信度阈值
+  val_iou_threshold: 0.6         # 验证时的IoU阈值
+
+  # 传输学习参数
+  freeze: false                  # 是否冻结层 (可以是数字或层名称)
+  multi_scale: false              # 启用多尺度训练
+
+# 数据增强配置 - 针对正常RGB摄像头摩托车检测优化
+augmentation:
+  # HSV增强 (RGB图像使用标准颜色增强参数)
+  hsv_h: 0.015                   # 色调增强范围 (标准值，增加颜色多样性)
+  hsv_s: 0.7                     # 饱和度增强范围 (标准值，增强颜色对比度)
+  hsv_v: 0.4                     # 明度增强范围 (标准值，模拟不同光照条件)
+
+  # 几何变换 - 摩托车形状和方向多样性
+  degrees: 5.0                   # 旋转角度范围 (标准值，摩托车有方向性)
+  translate: 0.1                 # 平移范围 (标准值)
+  scale: 0.5                     # 缩放范围 (标准值，模拟不同距离)
+  shear: 0.0                     # 剪切角度范围 (标准值)
+  perspective: 0.0               # 透视变换范围 (标准值)
+
+  # 翻转 - 保持摩托车特征完整性
+  flipud: 0.5                    # 上下翻转概率
+  fliplr: 0.5                    # 左右翻转概率 (标准值)
+
+  # 混合增强 - RGB图像标准增强
+  mosaic: 1.0                    # Mosaic增强概率 (标准值)
+  mixup: 0.0                     # Mixup增强概率 (标准值)
+
+# 类别特定强化参数 - 针对正常RGB摄像头摩托车检测优化
+# 单类别检测：只有motorcycle类别
+class_specific:
+  # 类别0 (motorcycle) - 唯一检测目标
+  0:
+    # 损失权重增强 - 标准摩托车检测
+    loss_weight: 1.0             # 标准权重，RGB图像特征丰富无需过度强化
+
+    # 数据增强强度倍数 - RGB图像标准增强
+    augmentation_scale: 1.0      # 标准增强强度
+
+    # 最小样本权重 - 确保摩托车样本充分训练
+    min_samples_weight: 1.0      # 标准权重
+
+    # 学习率倍数 - 标准学习率
+    lr_multiplier: 1.0           # 标准学习率
+
+# 数据集配置
+dataset:
+  # 数据集YAML文件路径
+  # 程序会自动读取该文件获取类别信息
+  dataset_yaml: "/home/media/wensiye/dataset/model8.5_RGB_motorcycle0107/dataset.yaml"
+
+  # 数据集根目录 (可选，用于验证路径)
+  root_path: "/home/media/wensiye/dataset/model8.5_RGB_motorcycle0107"
+
+# 高级配置 (可选)
+advanced:
+  # 多GPU训练参数
+  multi_gpu:
+    enabled: true                # 是否启用多GPU训练
+    sync_bn: true                 # 是否使用同步BatchNorm
+
+  # 混合精度训练
+  mixed_precision:
+    enabled: true                 # 是否启用混合精度训练
+
+  # 梯度裁剪
+  grad_clip:
+    enabled: false                # 是否启用梯度裁剪
+    max_norm: 10.0               # 最大梯度范数
+
+  # 早停参数
+  early_stopping:
+    enabled: false                # 是否启用早停
+    patience: 50                 # 容忍轮次
+    min_delta: 0.001             # 最小改善幅度
