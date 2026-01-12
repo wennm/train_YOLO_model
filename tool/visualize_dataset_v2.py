@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据集标签可视化脚本
-将YOLO格式的标签绘制在图片上，生成了visual版本的可视化图片
+数据集标签可视化脚本 v2
+将YOLO格式的标签以纯边界框形式绘制在图片上，目标框内部无填充颜色
 支持标准YOLO数据集结构，自动检测是否存在测试集
 """
 
@@ -14,8 +14,8 @@ from typing import List, Tuple, Optional
 import argparse
 
 
-class DatasetVisualizer:
-    """数据集可视化类"""
+class DatasetVisualizerV2:
+    """数据集可视化类v2 - 纯边界框版本"""
 
     def __init__(self, dataset_path: str, output_path: str):
         """
@@ -52,21 +52,25 @@ class DatasetVisualizer:
         images_dir = self.dataset_path / "images"
         labels_dir = self.dataset_path / "labels"
 
-        # 第一种结构判断：根目录下有 train/val 目录且这些目录下有 images 子目录
-        if (train_dir.exists() and val_dir.exists() and
-            (train_dir / "images").exists() and (val_dir / "images").exists()):
-            print("[INFO] 检测到第一种结构：train/val/test 目录在根目录")
+        # 第一种结构判断：根目录下有 train 目录（val/test 可选）且包含 images 子目录
+        if train_dir.exists() and (train_dir / "images").exists():
+            if val_dir.exists():
+                print("[INFO] 检测到第一种结构：train/val/test 目录在根目录")
+            else:
+                print("[INFO] 检测到第一种结构（仅包含 train）：train 目录在根目录")
             return "nested"
 
         # 第二种结构判断：根目录下有 images/labels 目录
-        elif (images_dir.exists() and labels_dir.exists() and
-              (images_dir / "train").exists() and (labels_dir / "train").exists()):
-            print("[INFO] 检测到第二种结构：images/labels 目录在根目录，下面有 train/val/test")
+        elif images_dir.exists() and labels_dir.exists() and (images_dir / "train").exists():
+            if (images_dir / "val").exists():
+                print("[INFO] 检测到第二种结构：images/labels 目录在根目录，下面有 train/val/test")
+            else:
+                print("[INFO] 检测到第二种结构（仅包含 train）：images/labels 目录在根目录，下面有 train")
             return "standard"
 
         # 容错处理：只有一种结构的部分特征
-        elif train_dir.exists() and val_dir.exists():
-            print("[INFO] 检测到第一种结构（部分特征）")
+        elif train_dir.exists():
+            print("[INFO] 检测到第一种结构（部分特征，仅 train 目录）")
             return "nested"
         elif images_dir.exists() and labels_dir.exists():
             print("[INFO] 检测到第二种结构（部分特征）")
@@ -74,8 +78,8 @@ class DatasetVisualizer:
         else:
             print(f"[ERROR] 无法识别的数据集结构: {self.dataset_path}")
             print(f"[ERROR] 请确保数据集符合以下两种结构之一：")
-            print("  第一种结构：dataset/train/images/, dataset/val/images/, dataset/test/images/")
-            print("  第二种结构：dataset/images/train/, dataset/labels/train/, dataset/images/val/, dataset/labels/val/")
+            print("  第一种结构：dataset/train/images/, dataset/val/images/(可选), dataset/test/images/(可选)")
+            print("  第二种结构：dataset/images/train/, dataset/labels/train/, dataset/images/val/(可选), dataset/labels/val/(可选)")
             raise ValueError(f"无法识别的数据集结构: {self.dataset_path}")
 
     def _load_class_names(self) -> List[str]:
@@ -168,15 +172,14 @@ class DatasetVisualizer:
         return class_id, (x_center, y_center, width, height)
 
     def draw_bbox_on_image(self, image: np.ndarray, bbox: Tuple[float, float, float, float],
-                         class_id: int, alpha: float = 0.3) -> np.ndarray:
+                         class_id: int) -> np.ndarray:
         """
-        在图片上绘制YOLO边界框标签
+        在图片上绘制YOLO边界框标签（纯边框，无填充颜色）
 
         Args:
             image: 原始图片
             bbox: 边界框坐标 (x_center, y_center, width, height) - 归一化坐标
             class_id: 类别ID
-            alpha: 透明度
 
         Returns:
             绘制后的图片
@@ -201,12 +204,7 @@ class DatasetVisualizer:
 
         result = image.copy()
 
-        # 绘制半透明矩形填充
-        overlay = image.copy()
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
-        result = cv2.addWeighted(result, 1-alpha, overlay, alpha, 0)
-
-        # 绘制矩形边框
+        # 只绘制矩形边框，不填充颜色
         cv2.rectangle(result, (x1, y1), (x2, y2), color, 2)
 
         # 绘制类别标签
@@ -338,7 +336,7 @@ class DatasetVisualizer:
             label_file = labels_dir / f"{image_file.stem}.txt"
 
             # 生成输出文件名（添加visual后缀）
-            output_filename = f"{image_file.stem}_visual{image_file.suffix}"
+            output_filename = f"{image_file.stem}_visual_v2{image_file.suffix}"
             output_file = output_dir / output_filename
 
             # 检查是否已经处理过（避免重复处理）
@@ -361,7 +359,7 @@ class DatasetVisualizer:
 
     def visualize_dataset(self):
         """可视化整个数据集"""
-        print("[INFO] 开始数据集标签可视化...")
+        print("[INFO] 开始数据集标签可视化（v2 - 纯边界框版本）...")
         print(f"[INFO] 输入路径: {self.dataset_path}")
         print(f"[INFO] 输出路径: {self.output_path}")
         print(f"[INFO] 数据集结构类型: {self.dataset_type}")
@@ -421,24 +419,20 @@ class DatasetVisualizer:
         print(f"\n[SUCCESS] 数据集可视化完成！")
         print(f"[INFO] 输出目录: {self.output_path}")
         print("[INFO] 输出说明:")
-        print("  - 有标签的图片: 绘制了边界框和类别标签")
+        print("  - 有标签的图片: 绘制纯边界框和类别标签（无填充颜色）")
         print("  - 无标签的图片: 直接复制原图（负样本）")
-        print("  - 每个类别使用不同的颜色进行区分")
-        print("  - 输出文件名格式: 原文件名_visual.jpg")
+        print("  - 每个类别使用不同的边框颜色进行区分")
+        print("  - 输出文件名格式: 原文件名_visual_v2.jpg")
         print(f"  - 类别数量: {len(self.class_names)}")
         print("[INFO] 可以直接查看输出目录中的可视化图片来验证标注质量")
 
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description='标准YOLO数据集标签可视化工具')
-    # parser.add_argument('--input', type=str, default='F:\\wenw\\work\\dataset\\Infrared_dataset_yolo_20251208',
-    #                    help='输入数据集路径（YOLO格式）')
-    # parser.add_argument('--output', type=str, default='F:\\wenw\\work\\dataset\\Infrared_dataset_yolo_20251208-visual',
-    #                    help='输出数据集路径（可视化后的结果）')
-    parser.add_argument('--input', type=str, default='F:\\wenw\\work\\dataset\\infrared_origin_1117',
+    parser = argparse.ArgumentParser(description='标准YOLO数据集标签可视化工具 v2 - 纯边界框版本')
+    parser.add_argument('--input', type=str, default='F:\\wenw\\work\\dataset\\dataset_no_game_8class_1231',
                        help='输入数据集路径（YOLO格式）')
-    parser.add_argument('--output', type=str, default='F:\\wenw\\work\\dataset\\infrared_origin_1117-visual',
+    parser.add_argument('--output', type=str, default='F:\\wenw\\work\\dataset\\dataset_no_game_8class_1231-visual-v2',
                        help='输出数据集路径（可视化后的结果）')
     parser.add_argument('--limit', type=int, default=None,
                        help='限制处理的图片数量（用于快速测试）')
@@ -450,14 +444,14 @@ def main():
         print(f"[ERROR] 输入路径不存在: {args.input}")
         return
 
-    print(f"[INFO] 开始可视化YOLO数据集...")
+    print(f"[INFO] 开始可视化YOLO数据集（v2 - 纯边界框版本）...")
     print(f"[INFO] 输入路径: {args.input}")
     print(f"[INFO] 输出路径: {args.output}")
     if args.limit:
         print(f"[INFO] 限制处理图片数量: {args.limit}")
 
     # 创建可视化器并执行
-    visualizer = DatasetVisualizer(args.input, args.output)
+    visualizer = DatasetVisualizerV2(args.input, args.output)
 
     # 如果设置了限制，将其存储为类属性
     if args.limit:

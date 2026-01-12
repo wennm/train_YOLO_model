@@ -167,7 +167,7 @@ class OBBDatasetVisualizer:
         return class_id, points
 
     def draw_obb_on_image(self, image: np.ndarray, points: np.ndarray,
-                         class_id: int, alpha: float = 0.3) -> np.ndarray:
+                         class_id: int) -> np.ndarray:
         """
         在图片上绘制OBB标签
 
@@ -175,7 +175,6 @@ class OBBDatasetVisualizer:
             image: 原始图片
             points: 四个角的归一化坐标 (4, 2)
             class_id: 类别ID
-            alpha: 透明度
 
         Returns:
             绘制后的图片
@@ -191,11 +190,6 @@ class OBBDatasetVisualizer:
         # 获取类别颜色
         color = self.class_colors.get(class_id, (255, 255, 255))
         result = image.copy()
-
-        # 绘制填充的多边形
-        overlay = image.copy()
-        cv2.fillPoly(overlay, [pixel_points], color)
-        result = cv2.addWeighted(result, 1-alpha, overlay, alpha, 0)
 
         # 绘制多边形边框
         cv2.polylines(result, [pixel_points], isClosed=True, color=color, thickness=2)
@@ -436,7 +430,8 @@ def main():
 
     # 如果没有指定输入输出路径，使用默认值
     if not args.input:
-        args.input = 'F:\\wenw\\work\\dataset\\dataset_no_game_4class_1212'
+        # args.input = 'F:\\wenw\\work\\dataset\\dataset_no_game_4class_1212'
+        args.input = 'F:\\wenw\\work\\dataset\\dataset_no_game_7class_1231'
     if not args.output:
         args.output = f"{args.input}-obb-visual"
 

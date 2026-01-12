@@ -329,10 +329,10 @@ class YOLODatasetCleaner:
 # =================== 配置区域 - 在这里修改你的设置 ===================
 
 # 数据集路径 - 请修改为你的实际数据集路径
-DATASET_PATH = 'F:\\wenw\\work\\dataset\\nanshan-fire-dataset'
+DATASET_PATH = 'F:\wenw\work\dataset\原始补充\红外人像1230_onlyperson'
 
 # 要删除的标签类别列表，例如: [1] 删除标签1， [1, 2] 删除标签1和标签2
-LABELS_TO_REMOVE = [0]
+LABELS_TO_REMOVE = [1]
 
 # 要处理的子集，None表示自动检测所有存在的子集
 # 可选值: ['train', 'val', 'test'] 或 None
@@ -342,7 +342,7 @@ SUBSETS_TO_PROCESS = None
 CREATE_BACKUP = True
 
 # 运行模式
-MODE = 'preview'  # 'preview' (预览) | 'dry_run' (试运行) | 'clean' (实际清洗)
+MODE = 'clean'  # 'preview' (预览) | 'dry_run' (试运行) | 'clean' (实际清洗)
 
 # ======================================
 # 常用配置示例:
