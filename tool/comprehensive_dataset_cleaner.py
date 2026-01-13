@@ -208,13 +208,21 @@ class YOLODatasetCleaner:
                     except (ValueError, IndexError):
                         continue
 
-                # 检查是否需要重编号（如果存在大于0的标签ID，说明需要重编号）
-                needs_renumbering = any(class_id > 0 for class_id in remaining_class_ids)
+                # 检查是否需要重编号：只有当存在大于被删除标签的ID时才需要重编号
+                needs_renumbering = any(
+                    class_id > min(labels_to_remove)
+                    for class_id in remaining_class_ids
+                )
 
                 if needs_renumbering or removed_in_file > 0:
-                    # 创建映射关系：原始ID -> 新ID
-                    sorted_ids = sorted(remaining_class_ids)
-                    id_mapping = {old_id: new_id for new_id, old_id in enumerate(sorted_ids)}
+                    # 创建映射关系：只对大于被删除标签的ID进行重新编号
+                    # 例如：删除标签6，保留[1,4,5,7,8]，则7->6, 8->7
+                    id_mapping = {}
+                    for old_id in remaining_class_ids:
+                        # 计算有多少个被删除的标签小于当前标签
+                        offset = sum(1 for removed_id in labels_to_remove if removed_id < old_id)
+                        new_id = old_id - offset
+                        id_mapping[old_id] = new_id
 
                     # 重新编号并写入文件
                     renumbered_labels = []
@@ -329,10 +337,10 @@ class YOLODatasetCleaner:
 # =================== 配置区域 - 在这里修改你的设置 ===================
 
 # 数据集路径 - 请修改为你的实际数据集路径
-DATASET_PATH = 'F:\wenw\work\dataset\原始补充\红外人像1230_onlyperson'
+DATASET_PATH = 'F:\wenw\work\dataset\dataset_no_game_6class_0113'
 
 # 要删除的标签类别列表，例如: [1] 删除标签1， [1, 2] 删除标签1和标签2
-LABELS_TO_REMOVE = [1]
+LABELS_TO_REMOVE = [6]
 
 # 要处理的子集，None表示自动检测所有存在的子集
 # 可选值: ['train', 'val', 'test'] 或 None
